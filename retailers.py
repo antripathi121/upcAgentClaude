@@ -38,11 +38,19 @@ def amazon_lookup(upc):
         data = r.json()
         if data.get("items"):
             item = data["items"][0]
+
+            # Pull offer titles — often contain "12 oz", "16 ct" etc.
+            offer_titles = " | ".join(
+                o.get("title", "") for o in (item.get("offers") or [])[:3] if o.get("title")
+            )
+
             parts = [
                 item.get("title", ""),
                 item.get("brand", ""),
                 item.get("description", ""),
                 item.get("size", ""),
+                item.get("weight", ""),
+                offer_titles,
             ]
             text = "\n".join(v for v in parts if v)
             return text.strip() or None
@@ -157,6 +165,28 @@ def vitacost_lookup(upc):
             ".product-name",
             "h2.product-title",
             ".ga-product-name",
+        ]
+    )
+
+
+def instacart_lookup(upc):
+    return _playwright_search(
+        f"https://www.instacart.com/store/s?k={upc}",
+        [
+            ".product-title",
+            "[data-testid='item_name']",
+            ".item-name",
+        ]
+    )
+
+
+def whole_foods_lookup(upc):
+    return _playwright_search(
+        f"https://www.wholefoodsmarket.com/search?text={upc}",
+        [
+            ".w-pie--product-tile__title",
+            "h2.product-name",
+            "[data-testid='product-title']",
         ]
     )
 

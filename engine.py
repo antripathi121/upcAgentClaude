@@ -5,27 +5,27 @@ from retailers import (
     frysfood_lookup,
     iherb_lookup,
     walmart_lookup,
-    walgreens_lookup,
     usda_lookup,
     barcodelookup_lookup,
-    vitacost_lookup,
+    instacart_lookup,
+    whole_foods_lookup,
     open_food_facts_lookup,
 )
 from claude_parser import extract_product_with_claude
 from ai import similarity
 
 RETAILER_CHAIN = [
-    ("Amazon",          amazon_lookup,          False),
     ("Target",          target_lookup,          False),
+    ("Amazon",          amazon_lookup,          False),
     ("Kroger",          kroger_lookup,          False),
-    ("Frysfood",        frysfood_lookup,        False),
     ("iHerb",           iherb_lookup,           False),
+    ("Instacart",       instacart_lookup,       False),
+    ("Frysfood",        frysfood_lookup,        False),
     ("Walmart",         walmart_lookup,         False),
-    ("Walgreens",       walgreens_lookup,       False),
-    ("USDA FoodData",   usda_lookup,            True),
-    ("Barcode Lookup",  barcodelookup_lookup,   False),
-    ("Vitacost",        vitacost_lookup,        False),
     ("Open Food Facts", open_food_facts_lookup, True),
+    ("Whole Foods",     whole_foods_lookup,     False),
+    ("Barcode Lookup",  barcodelookup_lookup,   False),
+    ("USDA FoodData",   usda_lookup,            True),
 ]
 
 
@@ -57,6 +57,47 @@ def _brand_equals_cpg(brand, cpg_provided):
     return "No"
 
 
+def _build_description(parsed):
+    brand        = (parsed.get("brand") or "").strip()
+    product_name = (parsed.get("product_name") or "").strip()
+    quantity     = (parsed.get("quantity") or "").strip()
+    size         = (parsed.get("size") or "").strip()
+
+    # Skip brand prefix if product_name already contains it
+    # e.g. brand="ZOA", product_name="ZOA Super Berry..." → don't prepend ZOA again
+    if brand and product_name.lower().startswith(brand.lower()):
+        name_part = product_name
+    else:
+        name_part = f"{brand} {product_name}".strip()
+
+    # Format: "ZOA Super Berry Energy Drink 12/12 oz"
+    if quantity and size:
+        pack = f"{quantity}/{size}"
+    else:
+        pack = quantity or size
+
+    parts = [p for p in [name_part, pack] if p]
+    return " ".join(parts)
+
+
+def _build_result(upc_raw, full_upc, cpg_provided, parsed, source_label):
+    brand = parsed.get("brand") or ""
+
+    return {
+        "upc_input":           str(upc_raw),
+        "full_upc":            full_upc,
+        "cpg_provided":        cpg_provided,
+        "cpg_verified":        parsed.get("cpg_company") or "",
+        "cpg_match":           _cpg_match(cpg_provided, parsed.get("cpg_company") or ""),
+        "brand":               brand,
+        "product_description": _build_description(parsed),
+        "sources":             source_label,
+        "brand_equals_cpg":    _brand_equals_cpg(brand, cpg_provided),
+        "relationship":        "Not Found",
+        "status":              "Success",
+    }
+
+
 def process_upc(upc_raw, cpg_provided="", on_source_check=None):
 
     full_upc = _normalize_upc(upc_raw)
@@ -66,7 +107,6 @@ def process_upc(upc_raw, cpg_provided="", on_source_check=None):
             on_source_check(retailer_name)
 
         raw_text = lookup_fn(full_upc)
-
         if not raw_text:
             continue
 
@@ -74,43 +114,19 @@ def process_upc(upc_raw, cpg_provided="", on_source_check=None):
         if not parsed:
             continue
 
-        brand        = parsed.get("brand") or ""
-        product_name = parsed.get("product_name") or ""
-        size         = parsed.get("size") or ""
-        quantity     = parsed.get("quantity") or ""
-        description  = parsed.get("description") or product_name
-        cpg_verified = parsed.get("cpg_company") or ""
-
         source_label = f"{retailer_name} (fallback)" if is_fallback else retailer_name
-
-        return {
-            "upc_input":       str(upc_raw),
-            "full_upc":        full_upc,
-            "cpg_provided":    cpg_provided,
-            "cpg_verified":    cpg_verified,
-            "cpg_match":       _cpg_match(cpg_provided, cpg_verified),
-            "brand":           brand,
-            "size":            size,
-            "quantity":        quantity,
-            "product_description": description,
-            "sources":         source_label,
-            "brand_equals_cpg": _brand_equals_cpg(brand, cpg_provided),
-            "relationship":    "Not Found",
-            "status":          "Success",
-        }
+        return _build_result(upc_raw, full_upc, cpg_provided, parsed, source_label)
 
     return {
-        "upc_input":       str(upc_raw),
-        "full_upc":        full_upc,
-        "cpg_provided":    cpg_provided,
-        "cpg_verified":    None,
-        "cpg_match":       "Not Found",
-        "brand":           None,
-        "size":            None,
-        "quantity":        None,
+        "upc_input":           str(upc_raw),
+        "full_upc":            full_upc,
+        "cpg_provided":        cpg_provided,
+        "cpg_verified":        None,
+        "cpg_match":           "Not Found",
+        "brand":               None,
         "product_description": None,
-        "sources":         None,
-        "brand_equals_cpg": "NA",
-        "relationship":    "Not Found",
-        "status":          "Not Found",
+        "sources":             None,
+        "brand_equals_cpg":    "NA",
+        "relationship":        "Not Found",
+        "status":              "Not Found",
     }

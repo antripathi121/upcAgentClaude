@@ -133,8 +133,8 @@ if file:
             result = {
                 "upc_input": str(upc_raw), "full_upc": str(upc_raw),
                 "cpg_provided": cpg_provided, "cpg_verified": None,
-                "cpg_match": "Error", "brand": None, "size": None,
-                "quantity": None, "product_description": str(e),
+                "cpg_match": "Error", "brand": None,
+                "product_description": str(e),
                 "sources": None, "brand_equals_cpg": "NA",
                 "relationship": "Not Found", "status": "Error",
             }
