@@ -169,6 +169,16 @@ def vitacost_lookup(upc):
     )
 
 
+def ebay_lookup(upc):
+    return _playwright_search(
+        f"https://www.ebay.com/sch/i.html?_nkw={upc}&LH_BIN=1",
+        [
+            ".s-item__title",
+            "h3.s-item__title",
+        ]
+    )
+
+
 def instacart_lookup(upc):
     return _playwright_search(
         f"https://www.instacart.com/store/s?k={upc}",
