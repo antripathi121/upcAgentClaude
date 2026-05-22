@@ -1,10 +1,16 @@
 import os
 import random
 import requests
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
 
-_STEALTH = Stealth(navigator_webdriver=True)
+# Playwright and stealth are optional — API-based sources still work without them.
+try:
+    from playwright.sync_api import sync_playwright
+    from playwright_stealth import Stealth
+    _STEALTH = Stealth(navigator_webdriver=True)
+    _PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    _PLAYWRIGHT_AVAILABLE = False
+    _STEALTH = None
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -23,6 +29,8 @@ _BLOCK_TITLES = ("access denied", "captcha", "robot", "just a moment", "are you 
 
 
 def _playwright_search(url, selectors, wait_ms=4000):
+    if not _PLAYWRIGHT_AVAILABLE:
+        return None
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -370,6 +378,8 @@ def usda_lookup(upc):
 
 def barcodelookup_lookup(upc):
     """barcodelookup.com — confirmed working; custom extraction for name + manufacturer."""
+    if not _PLAYWRIGHT_AVAILABLE:
+        return None
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -588,6 +598,8 @@ def whole_foods_lookup(upc):
 
 def goupc_lookup(upc):
     """go-upc.com — free, no auth, broad UPC database."""
+    if not _PLAYWRIGHT_AVAILABLE:
+        return None
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
