@@ -1,33 +1,46 @@
 from retailers import (
     amazon_lookup,
+    ebay_lookup,
     target_lookup,
     kroger_lookup,
-    frysfood_lookup,
     iherb_lookup,
-    ebay_lookup,
+    serpapi_amazon_lookup,
     walmart_lookup,
+    walgreens_lookup,
+    vitacost_lookup,
     usda_lookup,
     barcodelookup_lookup,
-    instacart_lookup,
     whole_foods_lookup,
+    goupc_lookup,
+    duckduckgo_lookup,
+    spoonacular_lookup,
     open_food_facts_lookup,
+    nutritionix_lookup,
 )
 from claude_parser import extract_product_with_claude
 from ai import similarity
 
+# Fast API sources first, then Playwright scrapers, fallbacks last.
+# eBay sandbox credentials are active — returns no data until switched to
+# production keys (EBAY_CLIENT_ID without "SBX" prefix).
 RETAILER_CHAIN = [
     ("Target",          target_lookup,          False),
-    ("Amazon",          amazon_lookup,          False),
-    ("Kroger",          kroger_lookup,          False),
-    ("iHerb",           iherb_lookup,           False),
-    ("Ebay",            ebay_lookup,            False),
-    ("Instacart",       instacart_lookup,       False),
-    ("Frysfood",        frysfood_lookup,        False),
-    ("Walmart",         walmart_lookup,         False),
-    ("Open Food Facts", open_food_facts_lookup, True),
-    ("Whole Foods",     whole_foods_lookup,     False),
+    ("UPCitemdb",       amazon_lookup,          False),
+    ("Open Food Facts", open_food_facts_lookup, False),
+    ("Spoonacular",     spoonacular_lookup,     False),
     ("Barcode Lookup",  barcodelookup_lookup,   False),
-    ("USDA FoodData",   usda_lookup,            True),
+    ("Go-UPC",          goupc_lookup,           False),
+    ("Amazon",          serpapi_amazon_lookup,  False),
+    ("Walmart",         walmart_lookup,         False),
+    # ("Nutritionix",     nutritionix_lookup,     False),
+    # ("iHerb",           iherb_lookup,           False),
+    # ("Kroger",          kroger_lookup,          False),
+    # ("eBay",            ebay_lookup,            False),
+    # ("Walgreens",       walgreens_lookup,       False),
+    # ("Vitacost",        vitacost_lookup,        False),
+    # ("Whole Foods",     whole_foods_lookup,     False),
+    # ("USDA FoodData",   usda_lookup,            True),
+    # ("DuckDuckGo",      duckduckgo_lookup,      True),
 ]
 
 
