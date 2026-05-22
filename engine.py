@@ -1,3 +1,5 @@
+import re
+
 from retailers import (
     amazon_lookup,
     ebay_lookup,
@@ -25,22 +27,22 @@ from ai import similarity
 # production keys (EBAY_CLIENT_ID without "SBX" prefix).
 RETAILER_CHAIN = [
     ("Target",          target_lookup,          False),
-    ("UPCitemdb",       amazon_lookup,          False),
-    ("Open Food Facts", open_food_facts_lookup, False),
+    ("eBay",            ebay_lookup,            False),
+    ("iHerb",           iherb_lookup,           False),
     ("Spoonacular",     spoonacular_lookup,     False),
+    ("UPCitemdb",       amazon_lookup,          False),
+    ("USDA FoodData",   usda_lookup,            True),
+    ("Open Food Facts", open_food_facts_lookup, False),
     ("Barcode Lookup",  barcodelookup_lookup,   False),
     ("Go-UPC",          goupc_lookup,           False),
-    ("Amazon",          serpapi_amazon_lookup,  False),
-    ("Walmart",         walmart_lookup,         False),
+    ("Whole Foods",     whole_foods_lookup,     False), #only on US proxy#
+    ("DuckDuckGo",      duckduckgo_lookup,      True),
     # ("Nutritionix",     nutritionix_lookup,     False),
-    # ("iHerb",           iherb_lookup,           False),
-    # ("Kroger",          kroger_lookup,          False),
-    # ("eBay",            ebay_lookup,            False),
     # ("Walgreens",       walgreens_lookup,       False),
     # ("Vitacost",        vitacost_lookup,        False),
-    # ("Whole Foods",     whole_foods_lookup,     False),
-    # ("USDA FoodData",   usda_lookup,            True),
-    # ("DuckDuckGo",      duckduckgo_lookup,      True),
+    # ("Amazon",          serpapi_amazon_lookup,  False),
+    # ("Walmart",         walmart_lookup,         False),
+   
 ]
 
 
@@ -72,6 +74,14 @@ def _brand_equals_cpg(brand, cpg_provided):
     return "No"
 
 
+_TRAILING_PACK = re.compile(
+    r'[\s\-–/]+\d[\d\s./]*'
+    r'(?:oz|fl\.?\s*oz|ml|g|lb|lbs|mg|mcg|iu|ct|count|servings?|packs?|pieces?|capsules?|tablets?)'
+    r'.*$',
+    re.IGNORECASE,
+)
+
+
 def _build_description(parsed):
     brand        = (parsed.get("brand") or "").strip()
     product_name = (parsed.get("product_name") or "").strip()
@@ -90,6 +100,15 @@ def _build_description(parsed):
         pack = f"{quantity}/{size}"
     else:
         pack = quantity or size
+
+    # If size/quantity is already embedded in name_part (e.g. "- 30 Servings - 3.4oz"),
+    # strip those trailing fragments before appending the clean formatted pack.
+    if pack:
+        norm = lambda s: re.sub(r"[\s./]", "", s.lower())
+        already_in_name = (size and norm(size) in norm(name_part)) or \
+                          (quantity and norm(quantity) in norm(name_part))
+        if already_in_name:
+            name_part = _TRAILING_PACK.sub("", name_part).strip().rstrip("-–").strip()
 
     parts = [p for p in [name_part, pack] if p]
     return " ".join(parts)

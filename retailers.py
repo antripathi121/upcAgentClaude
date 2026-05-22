@@ -272,14 +272,36 @@ def google_shopping_lookup(upc):
 
 
 def iherb_lookup(upc):
-    return _playwright_search(
-        f"https://www.iherb.com/search?kw={upc}",
-        [
-            ".product-title",
-            ".ga-product-name",
-            "h2.product-name",
-        ]
-    )
+    """iHerb UPC search — plain HTTP request, no Playwright needed.
+    iHerb renders search results server-side; product titles sit in
+    class='product-title' elements in the raw HTML.
+    """
+    try:
+        r = requests.get(
+            f"https://www.iherb.com/search?kw={upc}",
+            headers={
+                "User-Agent":      USER_AGENT,
+                "Accept":          "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return None
+
+        import re
+        # Product titles are in class="product-title" spans inside the listing
+        matches = re.findall(
+            r'class="product-title[^"]*"[^>]*>\s*(?:<[^>]+>)?\s*(.*?)\s*(?:<|$)',
+            r.text, re.DOTALL
+        )
+        titles = [re.sub(r"<[^>]+>", "", m).strip() for m in matches if m.strip()]
+        if not titles:
+            return None
+
+        return titles[0]
+    except Exception:
+        return None
 
 
 def _serpapi_key():
@@ -354,26 +376,49 @@ def walgreens_lookup(upc):
 
 
 def usda_lookup(upc):
+    """USDA FoodData Central — branded food lookup by GTIN/UPC.
+    Free API; DEMO_KEY works but is rate-limited. Set USDA_FDC_API_KEY in
+    secrets for higher limits (free key at https://fdc.nal.usda.gov/api-guide).
+    """
     try:
-        r = requests.get(
-            f"https://api.nal.usda.gov/fdc/v1/foods/search?query={upc}&api_key=DEMO_KEY",
-            timeout=10
-        )
-        data = r.json()
-        foods = data.get("foods", [])
-        if foods:
-            food = foods[0]
-            parts = [
-                food.get("description", ""),
-                food.get("brandOwner", ""),
-                food.get("brandName", ""),
-                food.get("ingredients", ""),
-            ]
-            text = "\n".join(v for v in parts if v)
-            return text.strip() or None
+        import streamlit as st
+        api_key = st.secrets.get("USDA_FDC_API_KEY", "") or "DEMO_KEY"
     except Exception:
-        pass
-    return None
+        api_key = os.environ.get("USDA_FDC_API_KEY", "DEMO_KEY")
+
+    try:
+        # USDA FDC is inconsistent: some products are indexed as GTIN-14 (14 digits,
+        # "00" prefix), others as GTIN-12. Try both to maximise hit rate.
+        gtin14  = upc.zfill(14)
+        upc_key = upc.lstrip("0")
+        match   = None
+        for query in (gtin14, upc):
+            r = requests.get(
+                "https://api.nal.usda.gov/fdc/v1/foods/search",
+                params={
+                    "query":    query,
+                    "dataType": "Branded",
+                    "pageSize": 5,
+                    "api_key":  api_key,
+                },
+                timeout=10,
+            )
+            if r.status_code != 200:
+                continue
+            foods = r.json().get("foods", [])
+            match = next((f for f in foods if f.get("gtinUpc", "").lstrip("0") == upc_key), None)
+            if match:
+                break
+        if match is None:
+            return None
+        parts = [
+            match.get("description", ""),
+            match.get("brandName", ""),
+            match.get("brandOwner", ""),
+        ]
+        return "\n".join(v for v in parts if v).strip() or None
+    except Exception:
+        return None
 
 
 def barcodelookup_lookup(upc):
@@ -586,6 +631,11 @@ def ebay_lookup(upc):
 
 
 def whole_foods_lookup(upc):
+    """Whole Foods UPC search via Playwright.
+    Works when running locally with a US IP. From non-US servers, Cloudflare
+    redirects all traffic to the UK site regardless of headers or geolocation,
+    so this will return None gracefully in that environment.
+    """
     return _playwright_search(
         f"https://www.wholefoodsmarket.com/search?text={upc}",
         [
@@ -638,31 +688,34 @@ def goupc_lookup(upc):
 
 
 def duckduckgo_lookup(upc):
-    """DuckDuckGo Instant Answers API — free, no auth, no rate limit."""
+    """DuckDuckGo HTML search — free, no auth.
+    The Instant Answers API returns nothing for raw UPCs (it only handles named
+    entities). The HTML endpoint surfaces UPC-specific pages as top results and
+    is parseable with plain regex.
+    """
     try:
+        import re
         r = requests.get(
-            "https://api.duckduckgo.com/",
-            params={"q": f"{upc} product", "format": "json", "no_html": "1", "skip_disambig": "1"},
-            headers={"User-Agent": USER_AGENT},
-            timeout=10,
+            "https://html.duckduckgo.com/html/",
+            params={"q": f"{upc} UPC"},
+            headers={
+                "User-Agent":      USER_AGENT,
+                "Accept":          "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=12,
         )
-        data = r.json()
+        if r.status_code != 200:
+            return None
 
-        parts = []
-        abstract = data.get("AbstractText", "").strip()
-        heading  = data.get("Heading", "").strip()
-        if heading and len(heading) > 3:
-            parts.append(heading)
-        if abstract and len(abstract) > 20:
-            parts.append(abstract)
+        titles   = re.findall(r'class="result__a"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', r.text, re.DOTALL)
 
-        # Related topics sometimes contain product info
-        for topic in data.get("RelatedTopics", [])[:3]:
-            text = topic.get("Text", "").strip()
-            if text and len(text) > 20 and upc in text:
-                parts.append(text)
-                break
+        from html import unescape
+        title   = unescape(re.sub(r"<[^>]+>", "", titles[0])).strip()   if titles   else ""
+        snippet = unescape(re.sub(r"<[^>]+>", "", snippets[0])).strip() if snippets else ""
 
+        parts = [v for v in [title, snippet] if v]
         return "\n".join(parts) or None
     except Exception:
         return None
