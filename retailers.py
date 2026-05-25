@@ -271,6 +271,54 @@ def google_shopping_lookup(upc):
         return None
 
 
+def foodland_lookup(upc):
+    """Foodland Super Market (Hawaii) — shop.foodland.com UPC search via Playwright.
+    Products render client-side; h3 elements containing 'Open product description'
+    are the product tiles. No stealth needed — site has no bot protection.
+    """
+    try:
+        from playwright.sync_api import sync_playwright as _sync_playwright
+        with _sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            )
+            ctx = browser.new_context(
+                user_agent=random.choice(USER_AGENTS),
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
+            page = ctx.new_page()
+            page.goto(
+                f"https://shop.foodland.com/sm/planning/rsid/11/results?q={upc}",
+                timeout=60000,
+                wait_until="networkidle",
+            )
+            page.wait_for_timeout(3000)
+
+            if any(s in page.title().lower() for s in _BLOCK_TITLES):
+                browser.close()
+                return None
+
+            h3s = page.locator("h3").all()
+            for el in h3s:
+                try:
+                    text = el.inner_text().strip()
+                    if "Open product description" in text:
+                        name = text.replace("\nOpen product description", "").strip()
+                        if name:
+                            browser.close()
+                            return name
+                except Exception:
+                    pass
+
+            browser.close()
+            return None
+    except Exception:
+        return None
+
+
 def iherb_lookup(upc):
     """iHerb UPC search — plain HTTP request, no Playwright needed.
     iHerb renders search results server-side; product titles sit in

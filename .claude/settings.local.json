@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python -m streamlit --version 2>&1)",
+      "PowerShell(Start-Sleep -Seconds 6; try { Invoke-WebRequest -Uri \"http://localhost:8501\" -TimeoutSec 5 -UseBasicParsing | Select-Object StatusCode, StatusDescription } catch { \"Error: $_\" })"
+    ]
+  }
+}

@@ -6,6 +6,7 @@ from retailers import (
     target_lookup,
     kroger_lookup,
     iherb_lookup,
+    foodland_lookup,
     serpapi_amazon_lookup,
     walmart_lookup,
     walgreens_lookup,
@@ -15,7 +16,6 @@ from retailers import (
     whole_foods_lookup,
     goupc_lookup,
     duckduckgo_lookup,
-    spoonacular_lookup,
     open_food_facts_lookup,
     nutritionix_lookup,
 )
@@ -29,7 +29,7 @@ RETAILER_CHAIN = [
     ("Target",          target_lookup,          False),
     ("eBay",            ebay_lookup,            False),
     ("iHerb",           iherb_lookup,           False),
-    ("Spoonacular",     spoonacular_lookup,     False),
+    ("Foodland",        foodland_lookup,        False),
     ("UPCitemdb",       amazon_lookup,          False),
     ("USDA FoodData",   usda_lookup,            True),
     ("Open Food Facts", open_food_facts_lookup, False),
@@ -46,11 +46,24 @@ RETAILER_CHAIN = [
 ]
 
 
+def _gs1_check_digit(digits):
+    """Calculate the GS1 check digit for a barcode body (works for UPC-A 11→12)."""
+    total = sum(int(d) * (3 if i % 2 == 0 else 1) for i, d in enumerate(digits))
+    return str((10 - total % 10) % 10)
+
+
 def _normalize_upc(raw):
     s = str(raw).strip()
     if "." in s:
         s = s.split(".")[0]
     s = "".join(c for c in s if c.isdigit())
+    # Fewer than 11 digits: leading zeros were stripped (common Excel behaviour).
+    # Pad back to 11, then fall through to check-digit logic below.
+    if len(s) < 11:
+        s = s.zfill(11)
+    # 11 digits = UPC-A body without check digit → append it
+    if len(s) == 11:
+        s = s + _gs1_check_digit(s)
     return s.zfill(12)
 
 
