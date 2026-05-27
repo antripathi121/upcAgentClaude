@@ -271,6 +271,54 @@ def google_shopping_lookup(upc):
         return None
 
 
+def foodland_lookup(upc):
+    """Foodland Super Market (Hawaii) — shop.foodland.com UPC search via Playwright.
+    Products render client-side; h3 elements containing 'Open product description'
+    are the product tiles. No stealth needed — site has no bot protection.
+    """
+    try:
+        from playwright.sync_api import sync_playwright as _sync_playwright
+        with _sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            )
+            ctx = browser.new_context(
+                user_agent=random.choice(USER_AGENTS),
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
+            page = ctx.new_page()
+            page.goto(
+                f"https://shop.foodland.com/sm/planning/rsid/11/results?q={upc}",
+                timeout=60000,
+                wait_until="networkidle",
+            )
+            page.wait_for_timeout(3000)
+
+            if any(s in page.title().lower() for s in _BLOCK_TITLES):
+                browser.close()
+                return None
+
+            h3s = page.locator("h3").all()
+            for el in h3s:
+                try:
+                    text = el.inner_text().strip()
+                    if "Open product description" in text:
+                        name = text.replace("\nOpen product description", "").strip()
+                        if name:
+                            browser.close()
+                            return name
+                except Exception:
+                    pass
+
+            browser.close()
+            return None
+    except Exception:
+        return None
+
+
 def iherb_lookup(upc):
     """iHerb UPC search — plain HTTP request, no Playwright needed.
     iHerb renders search results server-side; product titles sit in
@@ -528,17 +576,59 @@ def _ebay_token(client_id, cert_id, scope):
     return token
 
 
+def _pack_signature(title):
+    """Return a (pack_count, unit_size) tuple for majority-vote comparison.
+
+    Examples:
+      "Tide Pods 3 Pack 15 oz"      → ('3', '15')
+      "Oreo Original 13.29 Ounce"   → (None, '13.29')
+      "Lysol Wipes 80ct 4-Pack"     → ('4', '80')
+    """
+    import re as _re
+    t = title.lower()
+
+    # Explicit pack multipliers first ("4-pack", "3 pk", "set of 2")
+    explicit_pack = _re.search(
+        r'(?:set\s+of\s+|pack\s+of\s+)?(\d+)\s*[-–]?\s*(?:pack|pk)\b',
+        t,
+    )
+    # Fallback: ct/count/piece — used when no explicit pack marker found
+    ct_pack = _re.search(
+        r'(\d+)\s*[-–]?\s*(?:ct|count|piece|pc|pcs)\b',
+        t,
+    )
+    pack_m = explicit_pack or ct_pack
+
+    # Weight / volume size
+    size_m = _re.search(
+        r'(\d+(?:\.\d+)?)\s*(?:fl\.?\s*oz|ounce|oz|ml|g\b|lb|lbs|kg)',
+        t,
+    )
+
+    # If explicit pack found and ct also found, treat ct value as unit_size
+    unit_size = size_m.group(1) if size_m else None
+    if explicit_pack and ct_pack and not size_m:
+        unit_size = ct_pack.group(1)
+
+    return (
+        pack_m.group(1) if pack_m else None,
+        unit_size,
+    )
+
+
 def ebay_lookup(upc):
     """eBay UPC lookup — two strategies tried in order:
 
     1. Browse API item_summary/search?q={upc}  (basic scope, always available)
-       Searches live listings by UPC as keyword; picks the listing whose title
-       most likely represents the canonical product.
+       Fetches 15 listings, applies majority-vote on pack size signature, and
+       returns the title that represents the most common pack/size combination.
+       This prevents seller-variable quantities from polluting the result.
 
     2. Catalog API product_summary/search?gtin={upc}  (commerce.catalog.readonly)
        Exact GTIN match against eBay's product catalog.  Requires the scope to
        be enabled on the app by eBay Developer Support.
     """
+    from collections import Counter
     client_id, cert_id = _ebay_credentials()
     if not client_id or not cert_id:
         return None
@@ -547,28 +637,55 @@ def ebay_lookup(upc):
         base     = "https://api.sandbox.ebay.com" if sandbox else "https://api.ebay.com"
         h_base   = {"X-EBAY-C-MARKETPLACE-ID": "EBAY_US", "Accept": "application/json"}
 
-        # ── Strategy 1: Browse API (basic scope — no special access needed) ──
+        # ── Strategy 1: Browse API — majority-vote on pack size ──
         browse_scope = "https://api.ebay.com/oauth/api_scope"
         browse_token = _ebay_token(client_id, cert_id, browse_scope)
         if browse_token:
             h = {**h_base, "Authorization": f"Bearer {browse_token}"}
             r = requests.get(
                 f"{base}/buy/browse/v1/item_summary/search",
-                params={"q": upc, "limit": "5"},
+                params={"q": upc, "limit": "15"},
                 headers=h,
                 timeout=10,
             )
             if r.status_code == 200:
                 items = r.json().get("itemSummaries", [])
-                # Filter out noisy listings (accessories, "for", "compatible with")
-                _noise = ("for ", "compatible", "case for", "replacement", "repair")
-                clean  = [i for i in items if not any(n in i.get("title", "").lower() for n in _noise)]
-                pick   = (clean or items)[:1]
+
+                # Remove listings that are not the product itself
+                _noise = (
+                    "for ", "compatible", "case for", "replacement", "repair",
+                    "lot of", "wholesale", "bulk", "used", "empty", "refill",
+                )
+                clean = [
+                    i for i in items
+                    if not any(n in i.get("title", "").lower() for n in _noise)
+                ]
+                if not clean:
+                    clean = items
+
+                # Majority vote: find the most common (pack_count, unit_size) signature
+                sigs        = [_pack_signature(i.get("title", "")) for i in clean]
+                sig_counts  = Counter(sigs)
+                majority_sig = sig_counts.most_common(1)[0][0]
+
+                # Keep only listings that match the majority signature
+                majority = [
+                    i for i in clean
+                    if _pack_signature(i.get("title", "")) == majority_sig
+                ]
+                # Pick the shortest clean title from the majority group
+                # (shorter = less seller-added noise)
+                majority.sort(key=lambda i: len(i.get("title", "")))
+                pick = majority[0] if majority else (clean[0] if clean else None)
+
                 if pick:
-                    item  = pick[0]
-                    title = item.get("title", "").strip()
-                    brand_raw = item.get("brand")
-                    brand = brand_raw.get("brandName", "").strip() if isinstance(brand_raw, dict) else str(brand_raw or "").strip()
+                    title = pick.get("title", "").strip()
+                    brand_raw = pick.get("brand")
+                    brand = (
+                        brand_raw.get("brandName", "").strip()
+                        if isinstance(brand_raw, dict)
+                        else str(brand_raw or "").strip()
+                    )
                     parts = [v for v in [title, brand] if v]
                     if parts:
                         return "\n".join(parts)
