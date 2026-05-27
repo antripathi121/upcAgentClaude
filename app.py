@@ -182,6 +182,7 @@ with st.sidebar:
 # ── Main area ──────────────────────────────────────────────────────────────────
 
 st.title("KACU UPC Enrichment Engine")
+st.title("KACU UPC Enrichment Engine")
 st.markdown("<div style='color:#8b949e;margin-bottom:1.5rem'>Upload an Excel file with UPC and CPG columns to enrich product data.</div>", unsafe_allow_html=True)
 
 file = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
